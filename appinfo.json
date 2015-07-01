@@ -1,0 +1,85 @@
+{
+    "appKeys": {},
+    "capabilities": [
+        ""
+    ],
+    "companyName": "Serge M",
+    "longName": "MoveIt! for Pebble",
+    "projectType": "native",
+    "resources": {
+        "media": [
+            {
+                "file": "images/smileNeu.png",
+                "name": "SMILE_NEU",
+                "type": "png"
+            },
+            {
+                "file": "images/smileFun.png",
+                "name": "SMILE_FUN",
+                "type": "png"
+            },
+            {
+                "file": "images/smileSad.png",
+                "name": "SMILE_SAD",
+                "type": "png"
+            },
+            {
+                "file": "images/watchFace03.png",
+                "name": "IMAGE_BG02",
+                "type": "png"
+            },
+            {
+                "characterRegex": "[0-9.:]",
+                "file": "fonts/digital-7 (mono).ttf",
+                "name": "FONT_LCD_BOLD_26",
+                "trackingAdjust": -1,
+                "type": "font"
+            },
+            {
+                "characterRegex": "[0-9.:]",
+                "file": "fonts/digital-7 (mono).ttf",
+                "name": "FONT_LCD_BOLD_60",
+                "trackingAdjust": 2,
+                "type": "font"
+            },
+            {
+                "file": "images/Line4.png",
+                "name": "IMAGE_LINE4",
+                "type": "png"
+            },
+            {
+                "file": "images/Line3.png",
+                "name": "IMAGE_LINE3",
+                "type": "png"
+            },
+            {
+                "file": "images/Line2.png",
+                "name": "IMAGE_LINE2",
+                "type": "png"
+            },
+            {
+                "file": "images/Line1.png",
+                "name": "IMAGE_LINE1",
+                "type": "png"
+            },
+            {
+                "file": "images/Line0.png",
+                "name": "IMAGE_LINE0",
+                "type": "png"
+            },
+            {
+                "file": "images/watchFace01.png",
+                "name": "IMAGE_BG",
+                "type": "png"
+            }
+        ]
+    },
+    "sdkVersion": "2",
+    "shortName": "MoveIt!",
+    "uuid": "b2200aa0-c101-d010-e010-f00000001001",
+    "versionCode": 1,
+    "versionLabel": "0.1",
+    "watchapp": {
+        "watchface": true
+    }
+}
