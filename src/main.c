@@ -135,6 +135,80 @@ float my_sqrt(const float num) {
   return answer;
 }
 
+void processAccelerometerData(AccelData* acceleration, uint32_t size) 
+{
+    float evMax = 0;
+    float evMin = 5000000;
+    float evMean = 0;
+    float ev[10];
+    float evAv[10];
+    
+    for(uint32_t i=0;i<size&&i<10;i++){
+        ev[i] = my_sqrt(acceleration[i].x*acceleration[i].x + acceleration[i].y*acceleration[i].y + acceleration[i].z*acceleration[i].z);
+    }
+    
+    for(int i=0;i<9;i++){
+        evAv[i] = (ev[i]+ev[i+1])/2;
+    }
+    evAv[9] = evAv[8];
+    
+    for(int i=0;i<10;i++){
+        ev[i] -= evAv[i];
+        if(ev[i] < evMin) evMin = ev[i];
+    }
+    float evMin2 = 500000;
+    for(int i=0;i<10;i++){
+        ev[i] -= evMin;
+        ev[i] *= ev[i];
+        evMean += ev[i];
+        if(ev[i] > evMax) evMax = ev[i];
+        if(ev[i] < evMin2) evMin2 = ev[i];
+    }
+     evMean /= 10;
+    
+    for(int i=0;i<9;i++){
+        if(ev[i+1] == 0)continue;
+        float t = ev[i]/ev[i+1];
+        if(t<1.2 && t>=1){
+            ev[i+1] = evMin2;
+        }else if(t<1 && t>0.8){
+            ev[i] = evMin2;
+        }
+    }
+    
+    for(int i=0;i<10;i++){
+        if(ev[i] > evMean*1.1 && evMean > 30000){
+            steps++;
+        }
+    }
+    
+        totalSteps += steps == 1?1:steps/2;
+        if(steps > 0){
+            //mCurrentType = 2;
+            updateSteps();
+            updateGauge();
+        }else{
+            
+        }
+        steps = 0;
+    // Normalized squared:
+    // Sleeping: Mean < 30.000
+    // Seating: Mean
+    // Walking: mean ~600.000
+    // Jogging:
+    if(evMean < 150){
+        sleepCounterPerPeriod++;
+    }else{
+        otherCounterPerPeriod++;
+    }
+    
+    /*
+    static char tmpStr[128];
+    snprintf(tmpStr, 128, "%d-%d-%d:%d,%d,%d,%d,%d,%d,%d", (int) evMin2, (int)evMean, (int)evMax, (int)ev[0],(int)ev[1],(int)ev[2],(int)ev[3],(int)ev[4],(int)ev[5],(int)ev[6]);
+	app_log(APP_LOG_LEVEL_INFO, "Extr ", 0, tmpStr, mWindow);
+    */
+}
+
 /*
 for i from 1 to n  
 y[i] := y[i-1] + α * (x[i] - y[i-1])
@@ -150,7 +224,7 @@ static float accelY[10];
 static float accelZ[10];
 */
 
-void processAccelerometerData(AccelData* acceleration, uint32_t size) 
+void processAccelerometerDataWorking(AccelData* acceleration, uint32_t size) 
 {
     float evMax = 0;
     float evMin = 5000000;
