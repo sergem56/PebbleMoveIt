@@ -135,6 +135,10 @@ float my_sqrt(const float num) {
   return answer;
 }
 
+static float lastEv = 0;
+static int lastStepNo;
+static uint32_t stepsInARow = 0;
+
 void processAccelerometerData(AccelData* acceleration, uint32_t size) 
 {
     float evMax = 0;
@@ -146,43 +150,83 @@ void processAccelerometerData(AccelData* acceleration, uint32_t size)
     for(uint32_t i=0;i<size&&i<10;i++){
         ev[i] = my_sqrt(acceleration[i].x*acceleration[i].x + acceleration[i].y*acceleration[i].y + acceleration[i].z*acceleration[i].z);
     }
-    
-    for(int i=0;i<9;i++){
-        evAv[i] = (ev[i]+ev[i+1])/2;
+    evAv[0] = (lastEv + ev[0])/2;
+    for(int i=1;i<10;i++){
+        evAv[i] = (ev[i]+ev[i-1])/2;
     }
-    evAv[9] = evAv[8];
+    lastEv = ev[9];
     
     for(int i=0;i<10;i++){
         ev[i] -= evAv[i];
         if(ev[i] < evMin) evMin = ev[i];
     }
-    float evMin2 = 500000;
+    //float evMin2 = 500000;
     for(int i=0;i<10;i++){
         ev[i] -= evMin;
         ev[i] *= ev[i];
+        if(ev[i] > 800000)ev[i] = 800000;
         evMean += ev[i];
+        //if(ev[i] < evMin2) evMin2 = ev[i];
         if(ev[i] > evMax) evMax = ev[i];
-        if(ev[i] < evMin2) evMin2 = ev[i];
     }
-     evMean /= 10;
+    evMean -= evMax;
+    evMean /= 9;
     
+    float filterPercentage = 0.3;
+    int zeroOut[10];
     for(int i=0;i<9;i++){
         if(ev[i+1] == 0)continue;
         float t = ev[i]/ev[i+1];
-        if(t<1.2 && t>=1){
-            ev[i+1] = evMin2;
-        }else if(t<1 && t>0.8){
-            ev[i] = evMin2;
+        if(t<1+filterPercentage && t>=1){
+            //ev[i+1] = 0;
+            zeroOut[i+1] = 0;
+            zeroOut[i] = 1;
+        }else if(t<1 && t>1-filterPercentage){
+            //ev[i] = 0;
+            zeroOut[i] = 0;
+            zeroOut[i+1] = 1;
+        }
+        else{
+            zeroOut[i] = 1;
+            zeroOut[i+1] = 1;
         }
     }
+    
+    float evMeanMax = 0;
+    evMax = 0;
+    int cnt = 0;
+    for(int i=0;i<10;i++){
+        ev[i] *= zeroOut[i];
+        if(ev[i] > evMax) evMax = ev[i];
+        //evMean += ev[i];
+        if(ev[i] > evMean){
+            evMeanMax += ev[i];
+            cnt++;
+        } 
+    }
+    //evMean /= 10;
+    if(cnt != 0) evMeanMax /= cnt;
     
     for(int i=0;i<10;i++){
-        if(ev[i] > evMean*1.1 && evMean > 30000){
+        //stepNo++;
+        if(lastStepNo != 1 && ev[i] > evMeanMax*0.70 && evMeanMax > 50000){ // evMean*1.1 && evMean > 20000){
             steps++;
+            if(lastStepNo < 8)stepsInARow++;
+            else{
+                stepsInARow = 0;
+                steps = 0;
+            }
+            lastStepNo = 0;
         }
+        /*
+        static char tmpStr[32];
+        snprintf(tmpStr, 31, "%d;%d;%d", (int)ev[i], lastStepNo,(int)evMeanMax);
+        app_log(APP_LOG_LEVEL_INFO, "Extr ", 0, tmpStr, mWindow);
+        */
+        lastStepNo++;
     }
-    
-        totalSteps += steps == 1?1:steps/2;
+    if(stepsInARow > 5){
+        totalSteps += steps;// == 1?1:steps/2;
         if(steps > 0){
             //mCurrentType = 2;
             updateSteps();
@@ -191,12 +235,14 @@ void processAccelerometerData(AccelData* acceleration, uint32_t size)
             
         }
         steps = 0;
+    }
+    
     // Normalized squared:
     // Sleeping: Mean < 30.000
     // Seating: Mean
     // Walking: mean ~600.000
     // Jogging:
-    if(evMean < 150){
+    if(evMeanMax < 150){
         sleepCounterPerPeriod++;
     }else{
         otherCounterPerPeriod++;
@@ -204,7 +250,8 @@ void processAccelerometerData(AccelData* acceleration, uint32_t size)
     
     /*
     static char tmpStr[128];
-    snprintf(tmpStr, 128, "%d-%d-%d:%d,%d,%d,%d,%d,%d,%d", (int) evMin2, (int)evMean, (int)evMax, (int)ev[0],(int)ev[1],(int)ev[2],(int)ev[3],(int)ev[4],(int)ev[5],(int)ev[6]);
+    //snprintf(tmpStr, 128, "%d-%d-%d:%d,%d,%d,%d,%d,%d,%d", (int) evMin2, (int)evMean, (int)evMax, (int)ev[0],(int)ev[1],(int)ev[2],(int)ev[3],(int)ev[4],(int)ev[5],(int)ev[6]);
+    //snprintf(tmpStr, 128, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d", (int)ev[0],(int)ev[1],(int)ev[2],(int)ev[3],(int)ev[4],(int)ev[5],(int)ev[6],(int)ev[7]),(int)ev[8],(int)ev[9]);
 	app_log(APP_LOG_LEVEL_INFO, "Extr ", 0, tmpStr, mWindow);
     */
 }
@@ -231,21 +278,8 @@ void processAccelerometerDataWorking(AccelData* acceleration, uint32_t size)
     float evMean = 0;
     float ev[10];
     
-    //float alpha = 0.8;
     for(uint32_t i=0;i<size&&i<10;i++){
-
-        /*
-        // Get rid of gravity
-        gravityX[i] = alpha * gravityX[i] + (1 - alpha) * acceleration[i].x;
-        gravityY[i] = alpha * gravityY[i] + (1 - alpha) * acceleration[i].y;
-        gravityZ[i] = alpha * gravityZ[i] + (1 - alpha) * acceleration[i].z;
-
-        accelX[i] = acceleration[i].x - gravityX[i];
-        accelY[i] = acceleration[i].y - gravityY[i];
-        accelZ[i] = acceleration[i].z - gravityZ[i];
-        */
         ev[i] = my_sqrt(acceleration[i].x*acceleration[i].x + acceleration[i].y*acceleration[i].y + acceleration[i].z*acceleration[i].z);
-        //ev[i] = my_sqrt(accelX[i]*accelX[i] + accelY[i]*accelY[i] + accelZ[i]*accelZ[i]);
         ev[i] *= ev[i]; // make peaks sharper
         if(ev[i] > evMax) evMax = ev[i];
         if(ev[i] < evMin) evMin = ev[i];
@@ -254,24 +288,6 @@ void processAccelerometerDataWorking(AccelData* acceleration, uint32_t size)
     evMean /= 10;//min(10,step);
     evMean -= evMin;
     evMax -= evMin;
-    //char tmpStr[32];
-    
-    /*
-    float evMeanMax = 0;
-    int count = 0;
-    for(uint32_t i=0;i<10;i++){
-        ev[i] -= evMin;
-        if(ev[i] > evMean){
-            evMeanMax += ev[i];
-            count++;
-        }
-    }
-   
-    if(count > 0)
-        evMeanMax /= count;
-    else
-        return;
-    */
     
     /*
     char tmpStr[64];
@@ -289,117 +305,25 @@ void processAccelerometerDataWorking(AccelData* acceleration, uint32_t size)
         }else if(t<1 && t>0.8){
             ev[i] = evMin;
         }
-        /*
-        if(ev[i] > ev[i+1]*0.8){
-            ev[i+1] = evMin;
-        }*/
     }
     
     int stepCounted = 0;
     for(int i=0;i<10;i++){
         //ev[i] -= evMin; // well, I should do it, but it works better without! Or I need to tweak the next line...
-        
-        //if(ev[i] > evMax-(evMax-evMin)*0.3 && evMax > 1450){
         if(ev[i] > evMean+(evMax-evMean)*0.5 && evMean > 575000){
-        //if(ev[i] > evMeanMax && evMean > 300){
-            // step
-            /*
-            int distance = 0;
-            
-                if(i < stepSampleNo){
-                    distance = 9-(stepSampleNo)+i;
-                }else{
-                    distance = i-(stepSampleNo);
-                }
-            */
-            //int stepCounted = 0;
-            //if(distance > 2){
-                steps++;
-                stepSampleNo = i;
-                stepCounted = 1;
-            //}
-            /*    
-            char tmpStr[32];
-            snprintf(tmpStr, 32, "%5d-%5d-%5d:%2d", (int) ev[i], (int)evMeanMax, (int)evMax, (int)(stepCounted));
-	        app_log(APP_LOG_LEVEL_INFO, "Extr ", 0, tmpStr, mWindow);
-            */
+            steps++;
         }
-        
-        //snprintf(tmpStr, 64, "%5d ", (int) ev[i]);
-	    //app_log(APP_LOG_LEVEL_INFO, "energy ", i, tmpStr, mWindow);
-    }
-    
-    if(stepCounted == 0){
-        stepSampleNo = -1;
     }
 
-    /*
-    //float maxes[10];
-    char tmpStr[32];
-    bool direction = false; // false = falling true = growing
-    bool lastDir = direction;
-    int j = 0;
-    float amp;
-    for(uint32_t i=0;i<10;i++){
-        if(i==0){
-            if(lastEv == 0){
-                lastEv = ev[0];
-                continue;
-            }
-            amp = ev[0] - lastEv;
-        }else{
-            amp = ev[i]-ev[i-1];
-        }
-        direction = amp > 0;
-        if(lastDir != direction){
-           // maxes[j++] = ev[i];
-            if(lastMax != 0){
-                if(abs(ev[i] - lastMax) > (evMean)*0.4 && evMean > 370){
-                    steps++;
-                }
-                snprintf(tmpStr, 32, "%5d-%5d", (int) ev[i], (int)evMean);
-                app_log(APP_LOG_LEVEL_INFO, "energy", i, tmpStr, mWindow);
-            }
-            lastMax = ev[i];
-        }
-        lastDir = direction;
-        lastEv = ev[i];
-    }
-    */
-    /*
-    char tmpStr[32];
-    for(int i=0;i<j;i++){
-        snprintf(tmpStr, 32, "%5d-%5d", (int) maxes[i], (int)evMean);
-	    app_log(APP_LOG_LEVEL_INFO, "energy", i, tmpStr, mWindow);
-    }
-    */
-    
-    if(accum >= 1){
-        totalSteps += steps == 1?1:steps/2;
-        if(steps > 0){
-            //mCurrentType = 2;
-            updateSteps();
-            updateGauge();
-        }else{
-            
-        }
-        accum = 0;
-        steps = 0;
+    totalSteps += steps == 1?1:steps/2;
+    if(steps > 0){
+        //mCurrentType = 2;
+        updateSteps();
+        updateGauge();
     }else{
-        accum++;
+            
     }
-    
-    // Normalized:
-    // Sleeping: Mean < 992, max < 1008
-    // Seating: Mean ~1000-1030
-    // Walking:
-    // Jogging:
-    
-    // Minus gravity:
-    // Sleeping: Mean < 10, max < 1008
-    // Seating: Mean ~12-30
-    // Walking: 250
-    // Jogging:
+    steps = 0;
     
     // Normalized squared:
     // Sleeping: Mean < 30.000
