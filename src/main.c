@@ -123,7 +123,7 @@ static void battery_handler(BatteryChargeState charge_state) {
 
 float my_sqrt(const float num) {
   const uint MAX_STEPS = 40;
-  const float MAX_ERROR = 0.01;
+  const float MAX_ERROR = 0.1;
   
   float answer = num;
   float ans_sqr = answer * answer;
@@ -139,6 +139,8 @@ static float lastEv = 0;
 static int lastStepNo;
 static uint32_t stepsInARow = 0;
 
+// This one is better in false detection - almost no "sitting" steps and more accurate in walking steps counting
+// 
 void processAccelerometerData(AccelData* acceleration, uint32_t size) 
 {
     float evMax = 0;
@@ -150,6 +152,8 @@ void processAccelerometerData(AccelData* acceleration, uint32_t size)
     for(uint32_t i=0;i<size&&i<10;i++){
         ev[i] = my_sqrt(acceleration[i].x*acceleration[i].x + acceleration[i].y*acceleration[i].y + acceleration[i].z*acceleration[i].z);
     }
+    // Need to eliminate slow change and detect peaks...
+    // 1. Subtract very simple avarage
     evAv[0] = (lastEv + ev[0])/2;
     for(int i=1;i<10;i++){
         evAv[i] = (ev[i]+ev[i-1])/2;
@@ -160,18 +164,18 @@ void processAccelerometerData(AccelData* acceleration, uint32_t size)
         ev[i] -= evAv[i];
         if(ev[i] < evMin) evMin = ev[i];
     }
-    //float evMin2 = 500000;
+    // 2. Make it zero-based and highten peaks
     for(int i=0;i<10;i++){
         ev[i] -= evMin;
         ev[i] *= ev[i];
         if(ev[i] > 800000)ev[i] = 800000;
         evMean += ev[i];
-        //if(ev[i] < evMin2) evMin2 = ev[i];
         if(ev[i] > evMax) evMax = ev[i];
     }
     evMean -= evMax;
     evMean /= 9;
     
+    // 3. Filter out similar peaks (perhaps I don't need this since I limit minimum distance between peaks)
     float filterPercentage = 0.3;
     int zeroOut[10];
     for(int i=0;i<9;i++){
@@ -192,26 +196,27 @@ void processAccelerometerData(AccelData* acceleration, uint32_t size)
         }
     }
     
+    // 4. Find average value inside average-maximum channel
     float evMeanMax = 0;
     evMax = 0;
     int cnt = 0;
     for(int i=0;i<10;i++){
         ev[i] *= zeroOut[i];
         if(ev[i] > evMax) evMax = ev[i];
-        //evMean += ev[i];
+        
         if(ev[i] > evMean){
             evMeanMax += ev[i];
             cnt++;
         } 
     }
-    //evMean /= 10;
     if(cnt != 0) evMeanMax /= cnt;
     
+    // 5. Find peaks above average line and higher than minimum energy
     for(int i=0;i<10;i++){
-        //stepNo++;
-        if(lastStepNo != 1 && ev[i] > evMeanMax*0.70 && evMeanMax > 50000){ // evMean*1.1 && evMean > 20000){
+        // 3 steps per second = 180 steps per minute maximum, who can run faster?
+        if(lastStepNo > 1 && ev[i] > evMeanMax*0.70 && evMeanMax > 24000){ // evMean*1.1 && evMean > 20000){
             steps++;
-            if(lastStepNo < 8)stepsInARow++;
+            if(lastStepNo < 9)stepsInARow++;
             else{
                 stepsInARow = 0;
                 steps = 0;
@@ -225,7 +230,9 @@ void processAccelerometerData(AccelData* acceleration, uint32_t size)
         */
         lastStepNo++;
     }
-    if(stepsInARow > 5){
+    
+    // 6. Count steps only if there are several steps in a row
+    if(stepsInARow > 7){
         totalSteps += steps;// == 1?1:steps/2;
         if(steps > 0){
             //mCurrentType = 2;
@@ -237,20 +244,20 @@ void processAccelerometerData(AccelData* acceleration, uint32_t size)
         steps = 0;
     }
     
-    // Normalized squared:
-    // Sleeping: Mean < 30.000
-    // Seating: Mean
-    // Walking: mean ~600.000
-    // Jogging:
-    if(evMeanMax < 150){
+    // 7. Detect off-the-wrist condition not to buzz when nobody hears it
+    // Off the wrist: Mean < 150
+    // Seating: Mean up to 40.000
+    // Walking: mean ~40.000
+    // Jogging: ?
+    if(evMeanMax < 120){
         sleepCounterPerPeriod++;
     }else{
         otherCounterPerPeriod++;
     }
     
     /*
-    static char tmpStr[128];
-    //snprintf(tmpStr, 128, "%d-%d-%d:%d,%d,%d,%d,%d,%d,%d", (int) evMin2, (int)evMean, (int)evMax, (int)ev[0],(int)ev[1],(int)ev[2],(int)ev[3],(int)ev[4],(int)ev[5],(int)ev[6]);
+    static char tmpStr[32];
+    snprintf(tmpStr, 32, "%d:%d,%d,%d,%d", (int)evMeanMax, (int)ev[0],(int)ev[1],(int)ev[2],(int)ev[3]);
     //snprintf(tmpStr, 128, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d", (int)ev[0],(int)ev[1],(int)ev[2],(int)ev[3],(int)ev[4],(int)ev[5],(int)ev[6],(int)ev[7]),(int)ev[8],(int)ev[9]);
 	app_log(APP_LOG_LEVEL_INFO, "Extr ", 0, tmpStr, mWindow);
     */
@@ -271,6 +278,7 @@ static float accelY[10];
 static float accelZ[10];
 */
 
+// This one is pretty accurate, giving about 5-8% less steps, but counts some false steps that compensates it.
 void processAccelerometerDataWorking(AccelData* acceleration, uint32_t size) 
 {
     float evMax = 0;
