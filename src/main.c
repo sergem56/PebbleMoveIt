@@ -37,9 +37,9 @@ static char bufferGoal[8];
 static uint32_t dailyGoal;
 
 static uint32_t steps = 0;
-static int accum = 0;
+//static int accum = 0;
 
-static int stepSampleNo = 0;
+//static int stepSampleNo = 0;
 
 static TextLayer *s_time_layer;
 static TextLayer *s_steps_layer;
@@ -140,7 +140,10 @@ static int lastStepNo;
 static uint32_t stepsInARow = 0;
 
 // This one is better in false detection - almost no "sitting" steps and more accurate in walking steps counting
-// 
+// Steady pace walking - accuracy 100% - tested on 200-step blocks.
+// Sitting - almost no false steps.
+// Driving - +50-70 steps per 30-min drive - I think it's acceptable.
+// Misfit app counts about 30% more steps, however it's known for counting extra steps.
 void processAccelerometerData(AccelData* acceleration, uint32_t size) 
 {
     float evMax = 0;
@@ -153,7 +156,7 @@ void processAccelerometerData(AccelData* acceleration, uint32_t size)
         ev[i] = my_sqrt(acceleration[i].x*acceleration[i].x + acceleration[i].y*acceleration[i].y + acceleration[i].z*acceleration[i].z);
     }
     // Need to eliminate slow change and detect peaks...
-    // 1. Subtract very simple avarage
+    // 1. Subtract very simple average
     evAv[0] = (lastEv + ev[0])/2;
     for(int i=1;i<10;i++){
         evAv[i] = (ev[i]+ev[i-1])/2;
@@ -164,7 +167,7 @@ void processAccelerometerData(AccelData* acceleration, uint32_t size)
         ev[i] -= evAv[i];
         if(ev[i] < evMin) evMin = ev[i];
     }
-    // 2. Make it zero-based and highten peaks
+    // 2. Make it zero-based and highten peaks limiting their highest value
     for(int i=0;i<10;i++){
         ev[i] -= evMin;
         ev[i] *= ev[i];
@@ -172,11 +175,11 @@ void processAccelerometerData(AccelData* acceleration, uint32_t size)
         evMean += ev[i];
         if(ev[i] > evMax) evMax = ev[i];
     }
-    evMean -= evMax;
+    evMean -= evMax; // Don't count highest value
     evMean /= 9;
     
     // 3. Filter out similar peaks (perhaps I don't need this since I limit minimum distance between peaks)
-    float filterPercentage = 0.3;
+    float filterPercentage = 0.3; // if the difference less than 30% - skip the lowest
     int zeroOut[10];
     for(int i=0;i<9;i++){
         if(ev[i+1] == 0)continue;
@@ -196,7 +199,7 @@ void processAccelerometerData(AccelData* acceleration, uint32_t size)
         }
     }
     
-    // 4. Find average value inside average-maximum channel
+    // 4. Find the average value inside average-maximum channel
     float evMeanMax = 0;
     evMax = 0;
     int cnt = 0;
@@ -209,14 +212,22 @@ void processAccelerometerData(AccelData* acceleration, uint32_t size)
             cnt++;
         } 
     }
-    if(cnt != 0) evMeanMax /= cnt;
+    if(cnt != 0) // should't be zero anyway, just in case
+        evMeanMax /= cnt;
     
     // 5. Find peaks above average line and higher than minimum energy
     for(int i=0;i<10;i++){
-        // 3 steps per second = 180 steps per minute maximum, who can run faster?
+        // 3 steps per second = 180 steps per minute maximum, who can run faster? 
+        // Well, tests show that it drops steps somehow... Back to 1. 0.7 and 24.000 are pure empirical values.
+        // Values greater than 24.000 give less false detections, but can skip steps if you, for example, have something
+        // in your hand and don't move it much.
+        // One strange thing - movements in horizontal plane even with considerable amplitude, give very small ev value.
+        // So, walking in an elliptical trainer with moving handles counts only about 10% of real steps... Donna what to do 
+        // with that. Perhaps lowering evMeanMax would solve the problem, but will certainly give more false steps in other
+        // conditions.
         if(lastStepNo > 1 && ev[i] > evMeanMax*0.70 && evMeanMax > 24000){ // evMean*1.1 && evMean > 20000){
             steps++;
-            if(lastStepNo < 9)stepsInARow++;
+            if(lastStepNo < 9)stepsInARow++; // if last step was detected less than 0.9 seconds before current, count it as a sequence
             else{
                 stepsInARow = 0;
                 steps = 0;
@@ -231,11 +242,11 @@ void processAccelerometerData(AccelData* acceleration, uint32_t size)
         lastStepNo++;
     }
     
-    // 6. Count steps only if there are several steps in a row
+    // 6. Count steps only if there are several steps in a row to avoid random movements. Downside is that
+    // if you step less than 7 steps in a row or stop for a while it would not count them.
     if(stepsInARow > 7){
-        totalSteps += steps;// == 1?1:steps/2;
+        totalSteps += steps;
         if(steps > 0){
-            //mCurrentType = 2;
             updateSteps();
             updateGauge();
         }else{
@@ -244,12 +255,12 @@ void processAccelerometerData(AccelData* acceleration, uint32_t size)
         steps = 0;
     }
     
-    // 7. Detect off-the-wrist condition not to buzz when nobody hears it
-    // Off the wrist: Mean < 150
-    // Seating: Mean up to 40.000
-    // Walking: mean ~40.000
+    // 7. Detect off-the-wrist condition not to buzz when nobody hears it. Or at night.
+    // Off the wrist: Mean < 150 or Max < ~400
+    // Seating: Mean up to 24.000
+    // Walking: mean ~24.000
     // Jogging: ?
-    if(evMeanMax < 120){
+    if(evMax < 320){
         sleepCounterPerPeriod++;
     }else{
         otherCounterPerPeriod++;
@@ -257,7 +268,7 @@ void processAccelerometerData(AccelData* acceleration, uint32_t size)
     
     /*
     static char tmpStr[32];
-    snprintf(tmpStr, 32, "%d:%d,%d,%d,%d", (int)evMeanMax, (int)ev[0],(int)ev[1],(int)ev[2],(int)ev[3]);
+    snprintf(tmpStr, 32, "%d:%d-%d,%d,%d", (int)evMeanMax, (int)evMax,(int)ev[1],(int)ev[2],(int)ev[3]);
     //snprintf(tmpStr, 128, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d", (int)ev[0],(int)ev[1],(int)ev[2],(int)ev[3],(int)ev[4],(int)ev[5],(int)ev[6],(int)ev[7]),(int)ev[8],(int)ev[9]);
 	app_log(APP_LOG_LEVEL_INFO, "Extr ", 0, tmpStr, mWindow);
     */
@@ -315,7 +326,7 @@ void processAccelerometerDataWorking(AccelData* acceleration, uint32_t size)
         }
     }
     
-    int stepCounted = 0;
+    //int stepCounted = 0;
     for(int i=0;i<10;i++){
         //ev[i] -= evMin; // well, I should do it, but it works better without! Or I need to tweak the next line...
         if(ev[i] > evMean+(evMax-evMean)*0.5 && evMean > 575000){
