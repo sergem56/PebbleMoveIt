@@ -23,6 +23,7 @@ static int lastMinute;
 
 static int daysNo = 1;
 static int daysYes = 1;
+static bool dailyGoalBuzzed = false;
 
 static bool isMoving = false;
 static bool isSleeping = false;
@@ -37,9 +38,6 @@ static char bufferGoal[8];
 static uint32_t dailyGoal;
 
 static uint32_t steps = 0;
-//static int accum = 0;
-
-//static int stepSampleNo = 0;
 
 static TextLayer *s_time_layer;
 static TextLayer *s_steps_layer;
@@ -135,6 +133,19 @@ float my_sqrt(const float num) {
   return answer;
 }
 
+static void buzzAchieved(void){
+    
+    uint32_t segments[] = {500, 100, 100, 100, 100, 200, 500};
+ 
+    //Create a VibePattern structure with the segments and length of the pattern as fields
+    VibePattern pattern = {
+        .durations = segments,
+        .num_segments = 7,//ARRAY_LENGTH(segments),
+    };
+    //Trigger the custom pattern to be executed
+    vibes_enqueue_custom_pattern(pattern);
+}
+
 static float lastEv = 0;
 static int lastStepNo;
 static uint32_t stepsInARow = 0;
@@ -142,8 +153,9 @@ static uint32_t stepsInARow = 0;
 // This one is better in false detection - almost no "sitting" steps and more accurate in walking steps counting
 // Steady pace walking - accuracy 100% - tested on 200-step blocks.
 // Sitting - almost no false steps.
-// Driving - +50-70 steps per 30-min drive - I think it's acceptable.
-// Misfit app counts about 30% more steps, however it's known for counting extra steps.
+// Driving - +30-70 steps per 30-min drive - I think it's acceptable.
+// Misfit app counts about 30% more steps, however it's known for counting extra steps. It is very hard to avoid this - 
+// you count steps by detecting your hand moves...
 void processAccelerometerData(AccelData* acceleration, uint32_t size) 
 {
     float evMax = 0;
@@ -156,7 +168,7 @@ void processAccelerometerData(AccelData* acceleration, uint32_t size)
         ev[i] = my_sqrt(acceleration[i].x*acceleration[i].x + acceleration[i].y*acceleration[i].y + acceleration[i].z*acceleration[i].z);
     }
     // Need to eliminate slow change and detect peaks...
-    // 1. Subtract very simple average
+    // 1. Subtract very simple moving average
     evAv[0] = (lastEv + ev[0])/2;
     for(int i=1;i<10;i++){
         evAv[i] = (ev[i]+ev[i-1])/2;
@@ -218,14 +230,14 @@ void processAccelerometerData(AccelData* acceleration, uint32_t size)
     // 5. Find peaks above average line and higher than minimum energy
     for(int i=0;i<10;i++){
         // 3 steps per second = 180 steps per minute maximum, who can run faster? 
-        // Well, tests show that it drops steps somehow... Back to 1. 0.7 and 24.000 are pure empirical values.
+        // Well, tests show that it drops steps somehow... Back to 1. 0.8 and 24.000 are pure empirical values.
         // Values greater than 24.000 give less false detections, but can skip steps if you, for example, have something
         // in your hand and don't move it much.
         // One strange thing - movements in horizontal plane even with considerable amplitude, give very small ev value.
         // So, walking in an elliptical trainer with moving handles counts only about 10% of real steps... Donna what to do 
         // with that. Perhaps lowering evMeanMax would solve the problem, but will certainly give more false steps in other
         // conditions.
-        if(lastStepNo > 1 && ev[i] > evMeanMax*0.70 && evMeanMax > 24000){ // evMean*1.1 && evMean > 20000){
+        if(lastStepNo > 1 && ev[i] > evMeanMax*0.8 && evMeanMax > 24000){ // evMean*1.1 && evMean > 20000){
             steps++;
             if(lastStepNo < 9)stepsInARow++; // if last step was detected less than 0.9 seconds before current, count it as a sequence
             else{
@@ -246,6 +258,10 @@ void processAccelerometerData(AccelData* acceleration, uint32_t size)
     // if you step less than 7 steps in a row or stop for a while it would not count them.
     if(stepsInARow > 7){
         totalSteps += steps;
+        if(totalSteps >= dailyGoal && !dailyGoalBuzzed){
+            dailyGoalBuzzed = true;
+            buzzAchieved();
+        }
         if(steps > 0){
             updateSteps();
             updateGauge();
@@ -256,11 +272,11 @@ void processAccelerometerData(AccelData* acceleration, uint32_t size)
     }
     
     // 7. Detect off-the-wrist condition not to buzz when nobody hears it. Or at night.
-    // Off the wrist: Mean < 150 or Max < ~400
+    // Off the wrist: Mean < 150 or Max < ~200-400
     // Seating: Mean up to 24.000
     // Walking: mean ~24.000
     // Jogging: ?
-    if(evMax < 320){
+    if(evMax < 250){
         sleepCounterPerPeriod++;
     }else{
         otherCounterPerPeriod++;
@@ -273,21 +289,6 @@ void processAccelerometerData(AccelData* acceleration, uint32_t size)
 	app_log(APP_LOG_LEVEL_INFO, "Extr ", 0, tmpStr, mWindow);
     */
 }
-
-/*
-for i from 1 to n  
-y[i] := y[i-1] + α * (x[i] - y[i-1])
-*/
-
-/*
-static float gravityX[10];
-static float gravityY[10];
-static float gravityZ[10];
-
-static float accelX[10];
-static float accelY[10];
-static float accelZ[10];
-*/
 
 // This one is pretty accurate, giving about 5-8% less steps, but counts some false steps that compensates it.
 void processAccelerometerDataWorking(AccelData* acceleration, uint32_t size) 
@@ -362,6 +363,7 @@ void processAccelerometerDataWorking(AccelData* acceleration, uint32_t size)
     */
 }
 
+// Vibrate more insistive each 15 minutes
 static void buzz(void){
     //char msg[] = "buzz called";
 	//app_log(APP_LOG_LEVEL_DEBUG, "DEBUG", 0, msg, mWindow);
@@ -456,12 +458,12 @@ static void update_time(void) {
     }
     lastMinute = tick_time->tm_min;
     
-    isSleeping = sleepCounterPerPeriod > otherCounterPerPeriod;
+    isSleeping = sleepCounterPerPeriod > otherCounterPerPeriod; // or make it = otherCounterPerPeriod > 20?
     
     minuteCounter++;
     stepsPerPeriod = totalSteps - oldSteps;
     oldSteps = totalSteps;
-    if(stepsPerPeriod > 40){
+    if(stepsPerPeriod > 40){ // count active if you made more than 40 steps per minute
         segmentsInactive -= stepsPerPeriod/3;// 30;
         activeMinutes++;
         isMoving = true;
@@ -472,7 +474,7 @@ static void update_time(void) {
         buzzNo = 0;
     //}else if(stepsPerPeriod < 2){// what if it is night?
     //    isMoving = false;
-    }else if(stepsPerPeriod < 20 && !isSleeping){// sleepCounterPerPeriod <= otherCounterPerPeriod){
+    }else if(stepsPerPeriod < 20 && !isSleeping){ // less than 20 steps - you're inactive
         segmentsInactive++;
         //segmentsInactive += 14; // TEST
         isMoving = false;
@@ -484,7 +486,7 @@ static void update_time(void) {
     otherCounterPerPeriod = 0;
     
     if(segmentsInactive > 120){
-        segmentsInactive = 120; // to reset the timer you need 360 steps
+        segmentsInactive = 120; // to reset the timer you need 360 steps max
     }
     
     if(!needBuzz && segmentsInactive > 59 && !isMoving){
@@ -500,7 +502,7 @@ static void update_time(void) {
     
     if(dayNumber != tick_time->tm_yday){
         // Next day, reset all
-        if(totalSteps < dailyGoal){
+        if(totalSteps < dailyGoal){ // reduce your next daily goal by 5%
             dailyGoal *= 0.95;
             daysNo++;
             persist_write_int(1, daysNo);
@@ -516,6 +518,7 @@ static void update_time(void) {
         totalSteps = 0;
         oldSteps = 0;
         activeMinutes = 0;
+        dailyGoalBuzzed = false;
     }
     
     updateSteps();
