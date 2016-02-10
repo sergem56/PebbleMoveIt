@@ -120,14 +120,16 @@ static void battery_handler(BatteryChargeState charge_state) {
 }
 
 float my_sqrt(const float num) {
-  const uint MAX_STEPS = 40;
-  const float MAX_ERROR = 0.1;
+  const uint MAX_STEPS = 30;
+  const float MAX_ERROR = 1.0;
   
   float answer = num;
   float ans_sqr = answer * answer;
   uint step = 0;
   while((ans_sqr - num > MAX_ERROR) && (step++ < MAX_STEPS)) {
-    answer = (answer + (num / answer)) / 2;
+      if(answer != 0){
+          answer = (answer + (num / answer)) / 2;
+      }
     ans_sqr = answer * answer;
   }
   return answer;
@@ -135,7 +137,7 @@ float my_sqrt(const float num) {
 
 static void buzzAchieved(void){
     
-    uint32_t segments[] = {500, 100, 100, 100, 100, 200, 500};
+    uint32_t segments[] = {300, 150, 150, 120, 150, 300, 400};
  
     //Create a VibePattern structure with the segments and length of the pattern as fields
     VibePattern pattern = {
@@ -149,6 +151,9 @@ static void buzzAchieved(void){
 static float lastEv = 0;
 static int lastStepNo;
 static uint32_t stepsInARow = 0;
+
+static int totalEv = 0;
+static char tmpStr[14];
 
 // This one is better in false detection - almost no "sitting" steps and more accurate in walking steps counting
 // Steady pace walking - accuracy 100% - tested on 200-step blocks.
@@ -168,66 +173,25 @@ void processAccelerometerData(AccelData* acceleration, uint32_t size)
         ev[i] = my_sqrt(acceleration[i].x*acceleration[i].x + acceleration[i].y*acceleration[i].y + acceleration[i].z*acceleration[i].z);
     }
     // Need to eliminate slow change and detect peaks...
-    // 1. Subtract very simple moving average
+    // 1. Find very simple moving average
+    
     evAv[0] = (lastEv + ev[0])/2;
-    for(int i=1;i<10;i++){
-        evAv[i] = (ev[i]+ev[i-1])/2;
+    evAv[1] = (lastEv + ev[0]+ev[1])/3;
+    for(int i=2;i<10;i++){
+        evAv[i] = (ev[i]+ev[i-1]+ev[i-2])/3;
     }
     lastEv = ev[9];
     
-    for(int i=0;i<10;i++){
-        ev[i] -= evAv[i];
-        if(ev[i] < evMin) evMin = ev[i];
+    /*
+    // This one is OK, but requires more CPU
+    evAv[0] = (lastEv + ev[0])/2;
+    for(int i=1;i<10;i++){
+        evAv[i] = 0.18*ev[i]+0.82*evAv[i-1];
     }
-    // 2. Make it zero-based and highten peaks limiting their highest value
-    for(int i=0;i<10;i++){
-        ev[i] -= evMin;
-        ev[i] *= ev[i];
-        if(ev[i] > 800000)ev[i] = 800000;
-        evMean += ev[i];
-        if(ev[i] > evMax) evMax = ev[i];
-    }
-    evMean -= evMax; // Don't count highest value
-    evMean /= 9;
+    lastEv = ev[9];
+    */
     
-    // 3. Filter out similar peaks (perhaps I don't need this since I limit minimum distance between peaks)
-    float filterPercentage = 0.3; // if the difference less than 30% - skip the lowest
-    int zeroOut[10];
-    for(int i=0;i<9;i++){
-        if(ev[i+1] == 0)continue;
-        float t = ev[i]/ev[i+1];
-        if(t<1+filterPercentage && t>=1){
-            //ev[i+1] = 0;
-            zeroOut[i+1] = 0;
-            zeroOut[i] = 1;
-        }else if(t<1 && t>1-filterPercentage){
-            //ev[i] = 0;
-            zeroOut[i] = 0;
-            zeroOut[i+1] = 1;
-        }
-        else{
-            zeroOut[i] = 1;
-            zeroOut[i+1] = 1;
-        }
-    }
-    
-    // 4. Find the average value inside average-maximum channel
-    float evMeanMax = 0;
-    evMax = 0;
-    int cnt = 0;
-    for(int i=0;i<10;i++){
-        ev[i] *= zeroOut[i];
-        if(ev[i] > evMax) evMax = ev[i];
-        
-        if(ev[i] > evMean){
-            evMeanMax += ev[i];
-            cnt++;
-        } 
-    }
-    if(cnt != 0) // should't be zero anyway, just in case
-        evMeanMax /= cnt;
-    
-    // 5. Find peaks above average line and higher than minimum energy
+    // 2. Find peaks above average line and higher than minimum energy
     for(int i=0;i<10;i++){
         // 3 steps per second = 180 steps per minute maximum, who can run faster? 
         // Well, tests show that it drops steps somehow... Back to 1. 0.8 and 24.000 are pure empirical values.
@@ -237,23 +201,29 @@ void processAccelerometerData(AccelData* acceleration, uint32_t size)
         // So, walking in an elliptical trainer with moving handles counts only about 10% of real steps... Donna what to do 
         // with that. Perhaps lowering evMeanMax would solve the problem, but will certainly give more false steps in other
         // conditions.
-        if(lastStepNo > 1 && ev[i] > evMeanMax*0.8 && evMeanMax > 24000){ // evMean*1.1 && evMean > 20000){
+        evMean += ev[i];
+        if(lastStepNo > 2 && ev[i] > evAv[i]*1.05 && evAv[i] > 70){ // evMean*1.1 && evMean > 20000){
             steps++;
+            //snprintf(tmpStr, 31, "%d+%d", (int)ev[i],(int)evAv[i]);
             if(lastStepNo < 9)stepsInARow++; // if last step was detected less than 0.9 seconds before current, count it as a sequence
             else{
                 stepsInARow = 0;
                 steps = 0;
             }
             lastStepNo = 0;
+        }else{
+            //snprintf(tmpStr, 31, "%d;%d", (int)ev[i],(int)evAv[i]);
         }
-        /*
-        static char tmpStr[32];
-        snprintf(tmpStr, 31, "%d;%d;%d", (int)ev[i], lastStepNo,(int)evMeanMax);
-        app_log(APP_LOG_LEVEL_INFO, "Extr ", 0, tmpStr, mWindow);
-        */
+        
+        //static char tmpStr[32];
+        //app_log(APP_LOG_LEVEL_INFO, "Extr ", 0, tmpStr, mWindow);
+        
         lastStepNo++;
     }
-    
+        /*
+        snprintf(tmpStr, 63, "%d/%d, %d/%d", (int)ev[0],(int)evAv[0],(int)ev[1],(int)evAv[1]);
+        app_log(APP_LOG_LEVEL_INFO, "Extr ", 0, tmpStr, mWindow);
+    */
     // 6. Count steps only if there are several steps in a row to avoid random movements. Downside is that
     // if you step less than 7 steps in a row or stop for a while it would not count them.
     if(stepsInARow > 7){
@@ -276,18 +246,24 @@ void processAccelerometerData(AccelData* acceleration, uint32_t size)
     // Seating: Mean up to 24.000
     // Walking: mean ~24.000
     // Jogging: ?
-    if(evMax < 250){
+    
+    //snprintf(tmpStr, 63, "%d", (int)evMean);
+    //app_log(APP_LOG_LEVEL_INFO, "Extr ", 0, tmpStr, mWindow);
+    //if(evMax < 260){
+    //if(evMean < 130){
+    if(evMean < 10300){//10360
         sleepCounterPerPeriod++;
     }else{
         otherCounterPerPeriod++;
     }
+    evMean = 0;
     
-    /*
-    static char tmpStr[32];
-    snprintf(tmpStr, 32, "%d:%d-%d,%d,%d", (int)evMeanMax, (int)evMax,(int)ev[1],(int)ev[2],(int)ev[3]);
+    //static char tmpStr2[32];
+    //snprintf(tmpStr2, 32, "%5d:%5d", (int)evMeanMax, (int)evMax);
     //snprintf(tmpStr, 128, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d", (int)ev[0],(int)ev[1],(int)ev[2],(int)ev[3],(int)ev[4],(int)ev[5],(int)ev[6],(int)ev[7]),(int)ev[8],(int)ev[9]);
-	app_log(APP_LOG_LEVEL_INFO, "Extr ", 0, tmpStr, mWindow);
-    */
+	//app_log(APP_LOG_LEVEL_INFO, "Extr ", 0, tmpStr2, mWindow);
+    //APP_LOG(APP_LOG_LEVEL_INFO, "%d:%d", (int)evMeanMax, (int)evMax);
+    
 }
 
 // This one is pretty accurate, giving about 5-8% less steps, but counts some false steps that compensates it.
@@ -370,35 +346,38 @@ static void buzz(void){
     
     //Create an array of ON-OFF-ON etc durations in milliseconds
     uint32_t* segmentsPtr;
-    int len;
-    uint32_t segments[] = {300, 400, 500};
-    uint32_t segments1[] = {200, 400, 500, 400, 300};
-    uint32_t segments2[] = {200, 400, 500, 400, 300, 200, 500};
-    uint32_t segments3[] = {300, 300, 300, 300, 300, 300, 500};
+    int len = 3;
+    uint32_t segments[]  = {50, 300, 50+buzzNo};
+    segmentsPtr = segments;
+    /*
+    uint32_t segments[]  = {300, 300, 300, 1000, 300, 300, 190};
+    uint32_t segments1[] = {400, 300, 400, 2000, 300, 300, 300, 3000, 190};
+    uint32_t segments2[] = {500, 300, 500, 2000, 300, 300, 300, 4000, 300, 4000, 190};
+    uint32_t segments3[] = {600, 300, 600, 2000, 300, 300, 300, 5000, 300, 6000, 190};
     switch(buzzNo){
         case 0:{
             segmentsPtr = segments;
-            len = 3;
+            len = 7;
             break;
         }  
         case 1:{
             segmentsPtr = segments1;
-            len = 5;
+            len = 9;
             break;
         }
         case 2:{
             segmentsPtr = segments2;
-            len = 7;
+            len = 11;
             break;
         }
         default:{
             segmentsPtr = segments3;
-            len = 7;
+            len = 11;
             break;
         }
             
     }
- 
+*/ 
     //Create a VibePattern structure with the segments and length of the pattern as fields
     VibePattern pattern = {
         .durations = segmentsPtr,
@@ -407,17 +386,23 @@ static void buzz(void){
     //Trigger the custom pattern to be executed
     vibes_enqueue_custom_pattern(pattern);
     
-    buzzNo++;
+    //buzzNo++;
+    buzzNo += 50;
+    if(buzzNo > 500)buzzNo = 500;
 }
 
 static void updateGoal(void){
     snprintf(bufferGoal, 8, "%2d.%.2dK", (int)(dailyGoal/1000),(int)(dailyGoal%1000)/10);
     text_layer_set_text(s_goal_layer, bufferGoal);
     
-    float prcnt = daysYes*100/(daysYes+daysNo);
-    if(prcnt < 40){
+    int daysT = daysYes+daysNo;
+    if(daysT == 0){
+        daysT = 1;
+    }
+    float prcnt = daysYes*100/daysT;
+    if(prcnt < 30){
         bitmap_layer_set_bitmap(s_performance_layer, s_perf2_bitmap);
-    }else if(prcnt > 80){
+    }else if(prcnt > 50){
         bitmap_layer_set_bitmap(s_performance_layer, s_perf0_bitmap);
     }else{
         bitmap_layer_set_bitmap(s_performance_layer, s_perf1_bitmap);
@@ -429,6 +414,9 @@ static void update_time(void) {
   time_t temp = time(NULL); 
   struct tm *tick_time = localtime(&temp);
 
+    //APP_LOG(APP_LOG_LEVEL_INFO, "%d", totalEv/10);
+    
+    
   // Create a long-lived buffer
   static char buffer[] = "00:00";
 
@@ -458,13 +446,15 @@ static void update_time(void) {
     }
     lastMinute = tick_time->tm_min;
     
-    isSleeping = sleepCounterPerPeriod > otherCounterPerPeriod; // or make it = otherCounterPerPeriod > 20?
+    //isSleeping = (totalEv/10 < 1600); //sleepCounterPerPeriod > otherCounterPerPeriod*1.4; // or make it = otherCounterPerPeriod > 20?
+    //totalEv = 0;
+    isSleeping = (sleepCounterPerPeriod > 56);
     
     minuteCounter++;
     stepsPerPeriod = totalSteps - oldSteps;
     oldSteps = totalSteps;
-    if(stepsPerPeriod > 40){ // count active if you made more than 40 steps per minute
-        segmentsInactive -= stepsPerPeriod/3;// 30;
+    if(stepsPerPeriod > 50){ // count active if you made more than 40 steps per minute
+        segmentsInactive -= stepsPerPeriod/4;// 30;
         activeMinutes++;
         isMoving = true;
         if(segmentsInactive <= 0){
@@ -474,7 +464,7 @@ static void update_time(void) {
         buzzNo = 0;
     //}else if(stepsPerPeriod < 2){// what if it is night?
     //    isMoving = false;
-    }else if(stepsPerPeriod < 20 && !isSleeping){ // less than 20 steps - you're inactive
+    }else if(stepsPerPeriod < 30 && !isSleeping){ // less than 20 steps - you're inactive
         segmentsInactive++;
         //segmentsInactive += 14; // TEST
         isMoving = false;
@@ -495,7 +485,7 @@ static void update_time(void) {
         minuteCounter = 0;
     }
     
-    if(!isSleeping && needBuzz && minuteCounter % 15 == 0){
+    if(!isSleeping && needBuzz && minuteCounter % 6 == 0){
         buzz();
         minuteCounter = 0;
     }

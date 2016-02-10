@@ -14,33 +14,9 @@
                 "type": "png"
             },
             {
-                "file": "images/smileFun.png",
-                "name": "SMILE_FUN",
-                "type": "png"
-            },
-            {
-                "file": "images/smileSad.png",
-                "name": "SMILE_SAD",
-                "type": "png"
-            },
-            {
                 "file": "images/watchFace03.png",
                 "name": "IMAGE_BG02",
                 "type": "png"
-            },
-            {
-                "characterRegex": "[0-9.:]",
-                "file": "fonts/digital-7 (mono).ttf",
-                "name": "FONT_LCD_BOLD_26",
-                "trackingAdjust": -1,
-                "type": "font"
-            },
-            {
-                "characterRegex": "[0-9.:]",
-                "file": "fonts/digital-7 (mono).ttf",
-                "name": "FONT_LCD_BOLD_60",
-                "trackingAdjust": 2,
-                "type": "font"
             },
             {
                 "file": "images/Line4.png",
@@ -71,14 +47,38 @@
                 "file": "images/watchFace01.png",
                 "name": "IMAGE_BG",
                 "type": "png"
+            },
+            {
+                "file": "images/smileFun.png",
+                "name": "SMILE_FUN",
+                "type": "png"
+            },
+            {
+                "file": "images/smileSad.png",
+                "name": "SMILE_SAD",
+                "type": "png"
+            },
+            {
+                "characterRegex": "[0-9.:]",
+                "file": "fonts/digital-7 (mono).ttf",
+                "name": "FONT_LCD_BOLD_26",
+                "trackingAdjust": -1,
+                "type": "font"
+            },
+            {
+                "characterRegex": "[0-9.:]",
+                "file": "fonts/digital-7 (mono).ttf",
+                "name": "FONT_LCD_BOLD_60",
+                "trackingAdjust": 2,
+                "type": "font"
             }
         ]
     },
     "sdkVersion": "2",
     "shortName": "MoveIt!",
-    "uuid": "b2200aa0-c101-d010-e010-f00000001001",
+    "uuid": "0383cdf0-78a1-4d54-b49d-73749c3c7c62",
     "versionCode": 1,
-    "versionLabel": "0.1",
+    "versionLabel": "0.2",
     "watchapp": {
         "watchface": true
     }
